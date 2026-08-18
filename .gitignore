@@ -12,6 +12,10 @@ venv/
 .env
 .env.*
 !.env.example
+!backend/.env.example
+
+# Backend local
+backend/.venv/
 
 # Node / Next.js
 node_modules/

@@ -13,160 +13,166 @@ Personal open-source ML engineering platform for experiment tracking, evaluation
 
 MVP capabilities: automated experimentation, model evaluation, model inference — with visible experiment lineage (git commit → code change → metrics → checkpoint → eval/inference).
 
-Not an MLflow clone. Not a distributed training system.
-
 ## 2. Current architecture
 
 ```
-Local / deployed app (no GPU assumed)
-  └── FastAPI + Postgres (Supabase)     [Phase 3+]
-        ↑ register metrics / checkpoints / eval / inference
-Google Colab (GPU worker)
-  └── training/ (AutoResearch + TinyStories)   [Phase 2]
-        → artifacts/checkpoints/*.pt
-        → artifacts/results/*.json
+Google Colab GPU
+  └── training/ → artifacts/results/*.json + checkpoints/*.pt
+        ↓
+FastAPI (backend/)  POST /api/v1/experiments
+        ↓
+PostgreSQL (Supabase) — experiment / metrics / checkpoint metadata
+        ↓
+GET /api/v1/experiments/{experiment_id}
+
+Frontend (Next.js) — not started
 ```
 
-GPU execution is decoupled from the web app. Single-GPU only for MVP.
+Training does **not** depend on Supabase. Checkpoint **files** stay outside the DB (path/reference only).
 
 ## 3. Tech stack
 
 | Layer | Choice |
 |-------|--------|
-| Frontend | Next.js, React, TypeScript (planned) |
-| Backend | Python, FastAPI (planned) |
-| Database | PostgreSQL via Supabase (planned) |
-| Training | PyTorch / CUDA, AutoResearch GPT on TinyStories |
-
-Out of scope for MVP: NeMo, Megatron, Ray, LangChain, LangGraph, MLflow, ClickHouse, Kafka, Redis, Kubernetes.
+| Frontend | Next.js / React / TS (scaffold only) |
+| Backend | Python, FastAPI, Pydantic, SQLAlchemy 2, Alembic |
+| Database | PostgreSQL via Supabase (`DATABASE_URL`) |
+| Training | PyTorch / CUDA, TinyStories AutoResearch under `training/` |
 
 ## 4. Repository structure
 
 ```
 /
-├── frontend/                 # empty scaffold
-├── backend/                  # empty scaffold
-├── training/
-│   ├── prepare.py            # TinyStories prep, tokenizer, dataloader, evaluate_bpb
-│   ├── train.py              # model, optimizer, loop, checkpoint, result JSON
-│   ├── program.md            # agent instructions
-│   ├── requirements.txt      # Colab pip deps (torch from Colab)
-│   ├── pyproject.toml
-│   └── artifacts/            # gitignored: checkpoints/, results/
+├── backend/
+│   ├── app/
+│   │   ├── main.py
+│   │   ├── config.py
+│   │   ├── api/          # health, experiments, checkpoints
+│   │   ├── models/
+│   │   ├── schemas/
+│   │   ├── services/
+│   │   └── db/
+│   ├── alembic/versions/001_initial_schema.py
+│   ├── requirements.txt
+│   └── .env.example
+├── training/             # Phase 2 (unchanged this phase)
 ├── scripts/
 │   ├── colab_train.ipynb
-│   ├── print_colab_workflow.py
+│   ├── ingest_result.py
 │   └── verify_checkpoint.py
 ├── tests/
+│   ├── fixtures/exp_20260818_091852.json
+│   ├── test_api_experiments.py
 │   └── test_training_config.py
-├── .gitignore
+├── alembic.ini
 └── PROJECT_CONTEXT.md
 ```
 
 ## 5. Database schema
 
-Not implemented (Phase 3). Planned: experiments, experiment_metrics, checkpoints, evaluations, inference_runs.
+Tables (Alembic `001_initial`):
+
+- **experiments** — unique `experiment_id`, status, git_commit/dirty, parent_experiment_id, timestamps, duration_seconds, val_bpb, num_params, depth, vocab_size, max_seq_len, window_pattern, checkpoint_path, configuration JSONB, crash_message
+- **experiment_metrics** — FK → experiments.id; metric_name/value/step/recorded_at; unique (experiment_uuid, metric_name, step)
+- **checkpoints** — FK → experiments.id; checkpoint_path + metadata JSONB (no binary weights)
+- **evaluations** — schema only (Phase 7); FK → checkpoints / experiments
+- **inference_runs** — schema only (Phase 7); FK → checkpoints
 
 ## 6. Important design decisions
 
-- Own git root (not a Karpathy fork). Training vendored under `training/`.
-- TinyStories (not ClimbMix) in one controlled Phase 2 adaptation.
-- Primary metric remains **val_bpb** (lower is better).
-- Attention: try FlashAttention3 via `kernels` when available; else PyTorch SDPA (Colab T4-friendly). Default `WINDOW_PATTERN="L"` so SDPA matches full causal attention.
-- `train.py` requires CUDA; prepare/tokenizer do not.
-- App server must not assume a local GPU.
-- Single living context file: this file only.
+- Ingest the **same** Phase 2 result JSON shape (no second format).
+- Idempotent POST: duplicate `experiment_id` returns existing row (`created=false`).
+- Store summary metrics from the result (`val_bpb`, timings, tokens, …) in `experiment_metrics`.
+- Checkpoint binaries never uploaded in Phase 3.
+- API tests use isolated SQLite `create_all`, not production Supabase.
 
 ## 7. Current implementation status
 
-**Phase 2 complete (training foundation).** No FastAPI/DB/frontend yet.
+**Phase 3 backend/data foundation implemented.** API tests pass against SQLite. **Live Supabase verified:** Alembic `001_initial` applied; ingested `exp_20260818_091852` (idempotent re-POST); GET experiment/metrics/checkpoint metadata succeeded.
 
 ## 8. Completed tasks
 
-- [x] Task 0 inspection
-- [x] Phase 1 scaffold + initial commit `9192510` + GitHub remote
-- [x] Phase 2: TinyStories AutoResearch under `training/`, Colab workflow, checkpoint + result JSON, config tests
+- [x] Phases 0–2 + Colab smoke (`exp_20260818_091852`, val_bpb≈0.827788)
+- [x] Phase 3: schema, Alembic, FastAPI ingest/list/get/metrics/checkpoints, tests, `.env.example`, `scripts/ingest_result.py`
 
 ## 9. Current task
 
-None — waiting for Phase 3 instructions.
+None — waiting for Phase 4 (or Supabase manual wiring).
 
 ## 10. Known limitations
 
-- Full 5-minute GPU train / TinyStories download / CUDA pipeline **not executed in this local Windows environment** (no CUDA; dependency install blocked here). Verify on Colab via `scripts/colab_train.ipynb`.
-- Local checks run: file layout, syntax parse, batch-config unit tests.
-- `mfu_percent` still uses upstream H100 peak FLOPs reference (comparative only on Colab).
-- SDPA path does not implement sliding-window `"S"` exactly; keep `"L"` on Colab unless FA3 works.
-- No platform registration of results yet (Phase 3/4).
+- Live Supabase session-pooler connection verified for migrate + ingest; keep secrets only in gitignored `backend/.env` (never commit). **Rotate DB password if it was shared in chat.**
+- `evaluations` / `inference_runs` tables exist but have no APIs yet.
+- FA3 kernels still fall back to SDPA on Colab.
+- Hardened Colab notebook may still be uncommitted locally.
+- Test fixture mirrors Phase 2 schema; confirmed Colab fields include experiment_id, git_commit, val_bpb, num_params, depth/config — prefer POSTing the real Colab JSON when available.
 
-## 11. Next planned tasks
+## 11. Next planned tasks (Phase 4+)
 
-1. **Phase 3:** Postgres schema + FastAPI APIs for experiments/metrics/checkpoints.
-2. **Phase 4:** Colab → register result JSON / checkpoint metadata with the API.
-3. **Phases 5–7:** Dashboard, compare/progress, manual eval + inference.
+1. Wire Colab → POST result JSON to API (registration path).
+2. Confirm live Supabase rows for real experiments.
+3. Dashboard / compare / eval / inference UIs.
 
 ## 12. Important commands
 
 ```bash
-# Config sanity (no GPU)
-python tests/test_training_config.py
+# Backend deps
+python -m venv backend/.venv
+backend/.venv/Scripts/pip install -r backend/requirements.txt   # Windows
+# source backend/.venv/bin/activate && pip install -r backend/requirements.txt  # Unix
 
-# Colab / GPU machine
-cd training
-pip install -r requirements.txt
-python prepare.py                          # TinyStories + tokenizer
-python train.py                            # TIME_BUDGET=300 default
-AUTORESEARCH_TIME_BUDGET=30 AUTORESEARCH_NO_COMPILE=1 python train.py   # smoke
-python ../scripts/verify_checkpoint.py artifacts/checkpoints/<id>.pt
+# Tests (SQLite, no Supabase required)
+backend/.venv/Scripts/python -m pytest tests/test_api_experiments.py tests/test_training_config.py -q
+
+# Run API (from repo root)
+# copy backend/.env.example → backend/.env and set DATABASE_URL
+backend/.venv/Scripts/alembic upgrade head
+backend/.venv/Scripts/uvicorn backend.app.main:app --reload --app-dir .
+
+# Ingest a result JSON
+python scripts/ingest_result.py tests/fixtures/exp_20260818_091852.json
+# or: python scripts/ingest_result.py path/to/exp_20260818_091852.json
 ```
 
-Notebook: `scripts/colab_train.ipynb`
+### Manual Supabase verification
 
-## 13. Important environment variables
+1. Create Supabase project; copy Postgres URI into `backend/.env` as `DATABASE_URL=postgresql+psycopg://...`
+2. `alembic upgrade head`
+3. Start uvicorn
+4. `POST` real Phase 2 JSON (e.g. Colab `exp_20260818_091852`)
+5. `GET /api/v1/experiments/exp_20260818_091852` and `/metrics`
+6. Confirm rows in Supabase Table Editor (`experiments`, `experiment_metrics`, `checkpoints`)
+7. POST the same JSON again → `created: false`, still one row
+
+## 13. Environment variables
 
 | Variable | Purpose |
 |----------|---------|
-| `AUTORESEARCH_CACHE` | Override cache dir (default `~/.cache/autoresearch-platform`) |
-| `AUTORESEARCH_TIME_BUDGET` | Override training seconds (default 300 from prepare.py) |
-| `AUTORESEARCH_NO_COMPILE` | Set `1` to skip `torch.compile` (faster smoke) |
-| `AUTORESEARCH_EXPERIMENT_ID` | Optional fixed experiment id |
+| `DATABASE_URL` | SQLAlchemy URL for Supabase Postgres (`postgresql+psycopg://...`) |
+| Training vars | unchanged (`AUTORESEARCH_*`) |
 
-## 14. Training configuration (Phase 2 defaults)
+## 14. API endpoints (Phase 3)
 
-| Setting | Value | Where |
-|---------|-------|--------|
-| Dataset | `karpathy/tinystories-gpt4-clean` → `train.parquet` / `val.parquet` | prepare.py |
-| `MAX_SEQ_LEN` | 256 | prepare.py |
-| `VOCAB_SIZE` | 1024 | prepare.py |
-| `TIME_BUDGET` | 300 | prepare.py |
-| `EVAL_TOKENS` | 65536 | prepare.py |
-| `DEPTH` | 4 | train.py |
-| `WINDOW_PATTERN` | `"L"` | train.py |
-| `DEVICE_BATCH_SIZE` | 32 | train.py |
-| `TOTAL_BATCH_SIZE` | 2**14 (16384) | train.py |
-| Model dim | depth×64 → aligned to HEAD_DIM 128 → **256**, **2 heads** | train.py |
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/health` | Liveness |
+| POST | `/api/v1/experiments` | Ingest Phase 2 result JSON (idempotent) |
+| GET | `/api/v1/experiments` | List (`limit`, `offset`, `status`) |
+| GET | `/api/v1/experiments/{experiment_id}` | Detail + metrics + checkpoint metadata |
+| GET | `/api/v1/experiments/{experiment_id}/metrics` | Metrics only |
+| GET | `/api/v1/checkpoints` | Checkpoint metadata list |
+| GET | `/api/v1/checkpoints/{checkpoint_id}` | Checkpoint metadata detail |
 
-Batch invariant: `TOTAL_BATCH_SIZE % (DEVICE_BATCH_SIZE * MAX_SEQ_LEN) == 0` → 16384 % 8192 == 0.
+## 15. Training configuration
 
-### Checkpoint format
+Unchanged from Phase 2 (TinyStories small-compute defaults). Do not modify `training/prepare.py` / `train.py` casually.
 
-`training/artifacts/checkpoints/<experiment_id>.pt` — PyTorch dict with:
+## 16. Decisions that should not be accidentally changed
 
-- `model_state_dict`
-- `config` (GPTConfig fields)
-- `meta` (experiment_id, git_commit, git_dirty, val_bpb, …)
-
-### Result JSON
-
-`training/artifacts/results/<experiment_id>.json` — real run fields including `val_bpb`, timings, VRAM, tokens/steps/params, depth, git_commit/dirty, checkpoint_path, configuration.
-
-## 15. Decisions that should not be accidentally changed
-
-- Do not claim AI/Cursor/agent authorship anywhere.
-- Do not fork Karpathy as this repo root; keep code under `training/`.
-- Do not reintroduce ClimbMix as the MVP dataset.
-- Do not replace `val_bpb` as the primary metric.
+- Do not claim AI/Cursor authorship.
+- Training remains decoupled from Supabase.
+- Do not store checkpoint binaries in Postgres.
+- Do not replace `val_bpb` as primary metric.
 - Do not add MLflow / heavy infra in MVP.
-- Do not create extra living docs beyond this file.
-- GPU stays on Colab (or equivalent worker).
+- Only `PROJECT_CONTEXT.md` as living context doc.
 - Work in phases; stop after each phase.

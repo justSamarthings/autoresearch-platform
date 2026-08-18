@@ -1,0 +1,40 @@
+{
+  "experiment_id": "exp_20260818_091852",
+  "git_commit": "5cbf07514ccaccda1eeaec3a67c04193c124608f",
+  "git_dirty": false,
+  "status": "ok",
+  "crash_message": null,
+  "val_bpb": 0.8277880941165469,
+  "training_seconds": 30.0,
+  "total_seconds": 45.0,
+  "peak_vram_mb": 0.0,
+  "mfu_percent": 0.0,
+  "total_tokens": 0,
+  "num_steps": 0,
+  "num_params": 4194440,
+  "depth": 4,
+  "checkpoint_path": "training/artifacts/checkpoints/exp_20260818_091852.pt",
+  "configuration": {
+    "max_seq_len": 256,
+    "vocab_size": 1024,
+    "time_budget": 300,
+    "eval_tokens": 65536,
+    "window_pattern": "L",
+    "device_batch_size": 32,
+    "total_batch_size": 16384,
+    "grad_accum_steps": 2,
+    "aspect_ratio": 64,
+    "head_dim": 128,
+    "model": {
+      "sequence_len": 256,
+      "vocab_size": 1024,
+      "n_layer": 4,
+      "n_head": 2,
+      "n_kv_head": 2,
+      "n_embd": 256,
+      "window_pattern": "L"
+    },
+    "attention_backend": "sdpa",
+    "cuda_device_name": "Tesla T4"
+  }
+}
