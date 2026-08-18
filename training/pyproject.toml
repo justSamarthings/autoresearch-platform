@@ -1,0 +1,21 @@
+[project]
+name = "autoresearch-platform-training"
+version = "0.1.0"
+description = "TinyStories AutoResearch training for AutoResearch Experiment Platform"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.26.0",
+    "pyarrow>=14.0.0",
+    "requests>=2.32.0",
+    "rustbpe>=0.1.0",
+    "tiktoken>=0.7.0",
+    "torch>=2.2.0",
+]
+
+[project.optional-dependencies]
+fa3 = [
+    "kernels>=0.11.7",
+]
+
+[tool.uv]
+package = false

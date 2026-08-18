@@ -28,6 +28,11 @@ next-env.d.ts
 .DS_Store
 Thumbs.db
 
+# Training artifacts
+training/artifacts/
+training/results.tsv
+training/run.log
+
 # Training artifacts / caches
 *.pt
 *.pth

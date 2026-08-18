@@ -1,0 +1,11 @@
+# Training dependencies for Google Colab / CUDA environments.
+# Torch is provided by Colab — do not pin a conflicting torch here.
+
+requests>=2.32.0
+pyarrow>=14.0.0
+rustbpe>=0.1.0
+tiktoken>=0.7.0
+numpy>=1.26.0
+
+# Optional: FlashAttention3 kernels (falls back to PyTorch SDPA if unavailable)
+# kernels>=0.11.7

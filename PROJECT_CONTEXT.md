@@ -19,10 +19,12 @@ Not an MLflow clone. Not a distributed training system.
 
 ```
 Local / deployed app (no GPU assumed)
-  └── FastAPI + Postgres (Supabase)     [not implemented yet]
+  └── FastAPI + Postgres (Supabase)     [Phase 3+]
         ↑ register metrics / checkpoints / eval / inference
 Google Colab (GPU worker)
-  └── training/ (AutoResearch)          [not implemented yet]
+  └── training/ (AutoResearch + TinyStories)   [Phase 2]
+        → artifacts/checkpoints/*.pt
+        → artifacts/results/*.json
 ```
 
 GPU execution is decoupled from the web app. Single-GPU only for MVP.
@@ -34,7 +36,7 @@ GPU execution is decoupled from the web app. Single-GPU only for MVP.
 | Frontend | Next.js, React, TypeScript (planned) |
 | Backend | Python, FastAPI (planned) |
 | Database | PostgreSQL via Supabase (planned) |
-| Training | PyTorch / CUDA, AutoResearch-style GPT on TinyStories (Phase 2) |
+| Training | PyTorch / CUDA, AutoResearch GPT on TinyStories |
 
 Out of scope for MVP: NeMo, Megatron, Ray, LangChain, LangGraph, MLflow, ClickHouse, Kafka, Redis, Kubernetes.
 
@@ -42,88 +44,129 @@ Out of scope for MVP: NeMo, Megatron, Ray, LangChain, LangGraph, MLflow, ClickHo
 
 ```
 /
-├── frontend/          # Next.js UI (empty scaffold)
-├── backend/           # FastAPI + DB access (empty scaffold)
-├── training/          # AutoResearch training integration (empty scaffold)
-├── scripts/           # Setup / import / Colab helpers (empty scaffold)
-├── tests/             # Backend / training tests (empty scaffold)
+├── frontend/                 # empty scaffold
+├── backend/                  # empty scaffold
+├── training/
+│   ├── prepare.py            # TinyStories prep, tokenizer, dataloader, evaluate_bpb
+│   ├── train.py              # model, optimizer, loop, checkpoint, result JSON
+│   ├── program.md            # agent instructions
+│   ├── requirements.txt      # Colab pip deps (torch from Colab)
+│   ├── pyproject.toml
+│   └── artifacts/            # gitignored: checkpoints/, results/
+├── scripts/
+│   ├── colab_train.ipynb
+│   ├── print_colab_workflow.py
+│   └── verify_checkpoint.py
+├── tests/
+│   └── test_training_config.py
 ├── .gitignore
 └── PROJECT_CONTEXT.md
 ```
 
-Training lives under `training/` as a near-copy of upstream roles (`prepare.py`, `train.py`, `program.md`). No git submodule. This repo is **not** a fork of karpathy/autoresearch.
-
 ## 5. Database schema
 
-Not implemented. Planned tables (MVP):
-
-- `experiments` — id, name/number, status, timestamps, duration, git_commit, parent_experiment_id, checkpoint ref, val_bpb, configuration (JSONB), notes
-- `experiment_metrics` — experiment_id, metric_name, metric_value, step, timestamp
-- `checkpoints` — id, experiment_id, path/reference, created_at, metadata
-- `evaluations` — id, checkpoint_id, dataset, config, metrics, timestamps
-- `inference_runs` — id, checkpoint_id, prompt, output, generation params, timestamp
-
-Primary metric: **val_bpb** (lower is better). Secondary metrics only if training actually produces them.
+Not implemented (Phase 3). Planned: experiments, experiment_metrics, checkpoints, evaluations, inference_runs.
 
 ## 6. Important design decisions
 
-- New git repo owned by the project developer — not a Karpathy fork/clone as the project root.
-- Platform wraps AutoResearch; does not replace the training core.
-- `prepare.py` remains the fixed data/eval/utilities surface; `train.py` is the agent-editable surface; `program.md` is human-edited agent context.
-- TinyStories + Colab-scale knobs in **one** Phase 2 change set (no ClimbMix-first then redo).
+- Own git root (not a Karpathy fork). Training vendored under `training/`.
+- TinyStories (not ClimbMix) in one controlled Phase 2 adaptation.
+- Primary metric remains **val_bpb** (lower is better).
+- Attention: try FlashAttention3 via `kernels` when available; else PyTorch SDPA (Colab T4-friendly). Default `WINDOW_PATTERN="L"` so SDPA matches full causal attention.
+- `train.py` requires CUDA; prepare/tokenizer do not.
 - App server must not assume a local GPU.
-- Do not invent metrics, features, or authors (no AI/Cursor authorship in docs/UI/metadata).
 - Single living context file: this file only.
 
 ## 7. Current implementation status
 
-**Phase 1 complete.** Scaffold + git + context only.
+**Phase 2 complete (training foundation).** No FastAPI/DB/frontend yet.
 
 ## 8. Completed tasks
 
-- [x] Task 0: Inspect empty workspace and upstream karpathy/autoresearch
-- [x] Phase 1: `git init` (branch `main`), directory scaffold, `.gitignore`, `PROJECT_CONTEXT.md`
-- [x] Phase 1 structure checks passed (required dirs/files present; no unexpected files; on `main`)
-- [x] Initial commit baseline: `chore: initialize project structure`
+- [x] Task 0 inspection
+- [x] Phase 1 scaffold + initial commit `9192510` + GitHub remote
+- [x] Phase 2: TinyStories AutoResearch under `training/`, Colab workflow, checkpoint + result JSON, config tests
 
 ## 9. Current task
 
-None — waiting for Phase 2 instructions.
+None — waiting for Phase 3 instructions.
 
 ## 10. Known limitations
 
-- No training code, API, DB, or UI yet.
-- Upstream AutoResearch (reference) uses ClimbMix / large defaults; our TinyStories adaptation is deferred to Phase 2.
-- Upstream `train.py` does not appear to persist checkpoints; Phase 2+ must add minimal checkpoint export for eval/inference.
-- Empty dirs currently tracked via `.gitkeep`.
+- Full 5-minute GPU train / TinyStories download / CUDA pipeline **not executed in this local Windows environment** (no CUDA; dependency install blocked here). Verify on Colab via `scripts/colab_train.ipynb`.
+- Local checks run: file layout, syntax parse, batch-config unit tests.
+- `mfu_percent` still uses upstream H100 peak FLOPs reference (comparative only on Colab).
+- SDPA path does not implement sliding-window `"S"` exactly; keep `"L"` on Colab unless FA3 works.
+- No platform registration of results yet (Phase 3/4).
 
 ## 11. Next planned tasks
 
-1. **Phase 2:** Vendor AutoResearch into `training/`, adapt to TinyStories + Colab-scale parameters in one controlled change set; keep prepare/train/program roles; minimal checkpoint save if needed for later eval/inference.
-2. **Phase 3:** Postgres schema + FastAPI experiment/metrics/checkpoint APIs.
-3. **Phase 4:** Colab/scripts registration path (train → parse summary → register).
-4. **Phases 5–7:** Dashboard, progress/compare/models, manual eval + inference.
+1. **Phase 3:** Postgres schema + FastAPI APIs for experiments/metrics/checkpoints.
+2. **Phase 4:** Colab → register result JSON / checkpoint metadata with the API.
+3. **Phases 5–7:** Dashboard, compare/progress, manual eval + inference.
 
 ## 12. Important commands
 
 ```bash
-# Repo root
-git status
+# Config sanity (no GPU)
+python tests/test_training_config.py
+
+# Colab / GPU machine
+cd training
+pip install -r requirements.txt
+python prepare.py                          # TinyStories + tokenizer
+python train.py                            # TIME_BUDGET=300 default
+AUTORESEARCH_TIME_BUDGET=30 AUTORESEARCH_NO_COMPILE=1 python train.py   # smoke
+python ../scripts/verify_checkpoint.py artifacts/checkpoints/<id>.pt
 ```
 
-No app/train commands yet.
+Notebook: `scripts/colab_train.ipynb`
 
 ## 13. Important environment variables
 
-None yet. (Later: Supabase/DB URL, API URLs, Colab upload credentials — document when introduced.)
+| Variable | Purpose |
+|----------|---------|
+| `AUTORESEARCH_CACHE` | Override cache dir (default `~/.cache/autoresearch-platform`) |
+| `AUTORESEARCH_TIME_BUDGET` | Override training seconds (default 300 from prepare.py) |
+| `AUTORESEARCH_NO_COMPILE` | Set `1` to skip `torch.compile` (faster smoke) |
+| `AUTORESEARCH_EXPERIMENT_ID` | Optional fixed experiment id |
 
-## 14. Decisions that should not be accidentally changed
+## 14. Training configuration (Phase 2 defaults)
 
-- Do not claim AI/Cursor/agent authorship anywhere in the project.
-- Do not fork Karpathy repo as this project’s git root; training code is integrated under `training/`.
-- Do not introduce ClimbMix as an intermediate training setup.
+| Setting | Value | Where |
+|---------|-------|--------|
+| Dataset | `karpathy/tinystories-gpt4-clean` → `train.parquet` / `val.parquet` | prepare.py |
+| `MAX_SEQ_LEN` | 256 | prepare.py |
+| `VOCAB_SIZE` | 1024 | prepare.py |
+| `TIME_BUDGET` | 300 | prepare.py |
+| `EVAL_TOKENS` | 65536 | prepare.py |
+| `DEPTH` | 4 | train.py |
+| `WINDOW_PATTERN` | `"L"` | train.py |
+| `DEVICE_BATCH_SIZE` | 32 | train.py |
+| `TOTAL_BATCH_SIZE` | 2**14 (16384) | train.py |
+| Model dim | depth×64 → aligned to HEAD_DIM 128 → **256**, **2 heads** | train.py |
+
+Batch invariant: `TOTAL_BATCH_SIZE % (DEVICE_BATCH_SIZE * MAX_SEQ_LEN) == 0` → 16384 % 8192 == 0.
+
+### Checkpoint format
+
+`training/artifacts/checkpoints/<experiment_id>.pt` — PyTorch dict with:
+
+- `model_state_dict`
+- `config` (GPTConfig fields)
+- `meta` (experiment_id, git_commit, git_dirty, val_bpb, …)
+
+### Result JSON
+
+`training/artifacts/results/<experiment_id>.json` — real run fields including `val_bpb`, timings, VRAM, tokens/steps/params, depth, git_commit/dirty, checkpoint_path, configuration.
+
+## 15. Decisions that should not be accidentally changed
+
+- Do not claim AI/Cursor/agent authorship anywhere.
+- Do not fork Karpathy as this repo root; keep code under `training/`.
+- Do not reintroduce ClimbMix as the MVP dataset.
+- Do not replace `val_bpb` as the primary metric.
 - Do not add MLflow / heavy infra in MVP.
-- Do not create extra living docs (`ARCHITECTURE.md`, `TODO.md`, etc.).
-- Primary metric remains `val_bpb`.
-- GPU stays on Colab (or equivalent worker), not assumed on the dashboard host.
-- Work in phases; stop and wait after each phase.
+- Do not create extra living docs beyond this file.
+- GPU stays on Colab (or equivalent worker).
+- Work in phases; stop after each phase.
